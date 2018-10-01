@@ -2,14 +2,45 @@
 # Variable configuration.
 - include_tasks: variables.yml
 
-# Setup/install tasks.
-- include_tasks: setup-RedHat.yml
-  when: ansible_os_family == 'RedHat'
+- name: Ensure PostgreSQL packages are installed.
+  package:
+    name: "{{item}}"
+    state: present
+    enablerepo: "{{postgresql_enablerepo}}"
+  with_items: "{{postgresql_packages}}"
 
-- include_tasks: setup-Debian.yml
-  when: ansible_os_family == 'Debian'
+- name: Ensure PostgreSQL Python libraries are installed.
+  package:
+    name: "{{ postgresql_python_library }}"
+    state: present
+    enablerepo: "{{ postgresql_enablerepo }}"
 
-- include_tasks: initialize.yml  
+- name: Set PostgreSQL environment variables.
+  template:
+    src: postgres.sh.j2
+    dest: /etc/profile.d/postgres.sh
+    mode: 0644
+  notify: restart postgresql
+
+# Create the data dir
+- shell: mkdir {{ postgresql_data_dir }}
+- command: chmod 077 {{ postgresql_data_dir }} 
+- command: "chown {{ postgresql_user }}:{{ postgresql_group }} {{ postgresql_data_dir }}"
+
+- name: Check if PostgreSQL database is initialized.
+  stat:
+    path: "{{ postgresql_data_dir }}/PG_VERSION"
+  register: pgdata_dir_version
+
+- name: Ensure PostgreSQL database is initialized.
+  command: "{{ postgresql_bin_path }}/initdb -D {{ postgresql_data_dir }}"
+  when: not pgdata_dir_version.stat.exists
+  become: true
+  become_user: "{{ postgresql_user }}"
+  # See: https://github.com/ansible/ansible/issues/16048#issuecomment-229012509
+  vars:
+    ansible_ssh_pipelining: true
+
 - include_tasks: configure.yml   
 
 - name: Ensure PostgreSQL is started and enabled on boot.
